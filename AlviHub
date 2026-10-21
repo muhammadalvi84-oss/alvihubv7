@@ -1,0 +1,580 @@
+-- ==============================================
+-- 🔰 AlviHub — ESP + Auto Parry + Aimbot + Silent Aim
+-- Khusus Delta Executor
+-- ==============================================
+
+-- Layanan Inti
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local CurrentCamera = Workspace.CurrentCamera
+
+-- Pengaturan Fitur
+local Settings = {
+    -- Umum
+    AntiAFK = true,
+    Noclip = false,
+    InfiniteJump = false,
+    SpeedBoost = false,
+    SpeedValue = 0.03,
+    FullBright = false,
+    NoFog = false,
+    NoShadow = false,
+    AutoHeal = false,
+    NoSlowdown = false,
+    
+    -- ESP
+    ESP_Master = true,
+    ESP_Killer = true,
+    ESP_Survivor = true,
+    ESP_Name = true,
+    ESP_Distance = true,
+    ESP_Highlight = true,
+    
+    -- Auto Parry
+    AutoParry = false,
+    ParryRadius = 15,
+    ParryCooldown = 0.8,
+    
+    -- Aimbot
+    Aimbot = false,
+    AimbotKey = Enum.KeyCode.E,
+    AimbotSmoothness = 0.35,
+    AimbotMaxDistance = 150,
+    
+    -- Silent Aim
+    SilentAimVeil = false,
+    SilentAimPistol = false,
+    SilentAimRandomize = true
+}
+
+local LastParry = 0
+local SilentAimOriginal = nil
+
+-- ==============================================
+-- 🛡️ FUNGSI BANTUAN
+-- ==============================================
+local function getLocalRoot()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function getLocalHumanoid()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function isTeamKiller(p)
+    return p and p.Team and p.Team.Name == "Killer"
+end
+
+local function getDistance(pos)
+    local r = getLocalRoot()
+    return r and (pos - r.Position).Magnitude or 1e9
+end
+
+local function getNearestKiller(maxDist)
+    local root = getLocalRoot()
+    if not root then return nil, 1e9 end
+    local nearest, dist = nil, maxDist or 150
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and isTeamKiller(p) and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local d = (hrp.Position - root.Position).Magnitude
+                if d < dist then dist = d nearest = p end
+            end
+        end
+    end
+    return nearest, dist
+end
+
+local function getNearestSurvivor(maxDist)
+    local root = getLocalRoot()
+    if not root then return nil, 1e9 end
+    local nearest, dist = nil, maxDist or 150
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and not isTeamKiller(p) and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                local d = (hrp.Position - root.Position).Magnitude
+                if d < dist then dist = d nearest = p end
+            end
+        end
+    end
+    return nearest, dist
+end
+
+local function getScreenCenter()
+    local vp = CurrentCamera.ViewportSize
+    return Vector2.new(vp.X / 2, vp.Y / 2)
+end
+
+local function worldToScreen(pos)
+    local sp, onScreen = CurrentCamera:WorldToViewportPoint(pos)
+    return Vector2.new(sp.X, sp.Y), onScreen
+end
+
+-- ==============================================
+-- 🔄 ANTI AFK
+-- ==============================================
+task.spawn(function()
+    while task.wait(45) do
+        if Settings.AntiAFK then
+            pcall(function()
+                local vu = game:GetService("VirtualUser")
+                vu:Button2Down(Vector2.new(), CurrentCamera.CFrame)
+                task.wait(0.15)
+                vu:Button2Up(Vector2.new(), CurrentCamera.CFrame)
+            end)
+        end
+    end
+end)
+
+-- ==============================================
+-- 🚀 NOCLIP
+-- ==============================================
+RunService.Heartbeat:Connect(function()
+    if not Settings.Noclip then return end
+    local c = LocalPlayer.Character
+    if not c then return end
+    for _, p in ipairs(c:GetDescendants()) do
+        if p:IsA("BasePart") then p.CanCollide = false end
+    end
+end)
+
+-- ==============================================
+-- ⬆️ INFINITE JUMP
+-- ==============================================
+UserInputService.JumpRequest:Connect(function()
+    if Settings.InfiniteJump then
+        local h = getLocalHumanoid()
+        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+-- ==============================================
+-- ⚡ SPEED & NO SLOWDOWN
+-- ==============================================
+RunService.RenderStepped:Connect(function()
+    local r = getLocalRoot()
+    local h = getLocalHumanoid()
+    if not r or not h then return end
+    if Settings.SpeedBoost and h.MoveDirection.Magnitude > 0 then
+        r.CFrame = r.CFrame + h.MoveDirection * Settings.SpeedValue
+    end
+    if Settings.NoSlowdown then h.WalkSpeed = math.max(h.WalkSpeed, 16) end
+end)
+
+-- ==============================================
+-- 💡 PENCAHAYAAN
+-- ==============================================
+local function updateLighting()
+    if Settings.FullBright then
+        Lighting.Brightness = 5
+        Lighting.ClockTime = 14
+        Lighting.Ambient = Color3.fromRGB(255,255,255)
+        Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
+    end
+    Lighting.FogEnd = Settings.NoFog and 100000 or 1000
+    local at = Lighting:FindFirstChildOfClass("Atmosphere")
+    if at then at.Density = Settings.NoFog and 0 or 0.35 end
+    Lighting.GlobalShadows = not Settings.NoShadow
+end
+
+-- ==============================================
+-- ❤️ AUTO HEAL
+-- ==============================================
+task.spawn(function()
+    while task.wait(3) do
+        if not Settings.AutoHeal then continue end
+        local r = getLocalRoot()
+        local h = getLocalHumanoid()
+        if h and r and h.Health < h.MaxHealth then
+            pcall(function()
+                local rem = ReplicatedStorage:FindFirstChild("Remotes")
+                if rem and rem.Healing and rem.Healing.HealEvent then
+                    rem.Healing.HealEvent:FireServer(r, true)
+                end
+            end)
+        end
+    end
+end)
+
+-- ==============================================
+-- 👁️ SISTEM ESP
+-- ==============================================
+local function hapusESP(char)
+    if not char then return end
+    if char:FindFirstChild("ESP_Highlight") then char.ESP_Highlight:Destroy() end
+    if char:FindFirstChild("ESP_Nama") then char.ESP_Nama:Destroy() end
+end
+
+local function buatESP(p)
+    if not Settings.ESP_Master or p == LocalPlayer then return end
+    if not p.Character then return end
+    local char = p.Character
+    local head = char:FindFirstChild("Head")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not head or not root then return end
+    
+    local isK = isTeamKiller(p)
+    local show = (isK and Settings.ESP_Killer) or (not isK and Settings.ESP_Survivor)
+    if not show then hapusESP(char) return end
+    
+    local color = isK and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(40, 255, 80)
+    local tag = isK and "[KILLER] " or "[TEMAN] "
+    
+    -- Highlight
+    if Settings.ESP_Highlight then
+        local hl = char:FindFirstChild("ESP_Highlight") or Instance.new("Highlight")
+        hl.Name = "ESP_Highlight"
+        hl.Parent = char
+        hl.FillColor = color
+        hl.OutlineColor = color
+        hl.FillTransparency = 1
+        hl.OutlineTransparency = 0
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    else
+        if char:FindFirstChild("ESP_Highlight") then char.ESP_Highlight:Destroy() end
+    end
+    
+    -- Nama & Jarak
+    if Settings.ESP_Name then
+        local bg = head:FindFirstChild("ESP_Nama") or Instance.new("BillboardGui")
+        bg.Name = "ESP_Nama"
+        bg.Parent = head
+        bg.AlwaysOnTop = true
+        bg.Size = UDim2.new(0, 200, 0, 30)
+        bg.StudsOffset = Vector3.new(0, 3, 0)
+        
+        local lbl = bg:FindFirstChild("Label") or Instance.new("TextLabel")
+        lbl.Name = "Label"
+        lbl.Parent = bg
+        lbl.Size = UDim2.new(1,0,1,0)
+        lbl.BackgroundTransparency = 1
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextSize = 14
+        lbl.TextColor3 = color
+        lbl.TextStrokeTransparency = 0
+        
+        local text = tag .. p.DisplayName
+        if Settings.ESP_Distance then
+            local me = getLocalRoot()
+            if me then text = text .. " [" .. math.floor((root.Position - me.Position).Magnitude) .. "m]" end
+        end
+        lbl.Text = text
+    else
+        if head:FindFirstChild("ESP_Nama") then head.ESP_Nama:Destroy() end
+    end
+end
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if not Settings.ESP_Master then
+            for _, p in ipairs(Players:GetPlayers()) do if p.Character then hapusESP(p.Character) end end
+            task.wait(1)
+            continue
+        end
+        for _, p in ipairs(Players:GetPlayers()) do pcall(function() buatESP(p) end) end
+    end
+end)
+
+-- ==============================================
+-- ⚔️ AUTO PARRY
+-- ==============================================
+local function getNearestAttacker()
+    local root = getLocalRoot()
+    if not root then return nil, 1e9 end
+    local nearest, dist = nil, Settings.ParryRadius
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and isTeamKiller(p) and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local d = (hrp.Position - root.Position).Magnitude
+                if d < dist then dist = d nearest = p end
+            end
+        end
+    end
+    return nearest, dist
+end
+
+task.spawn(function()
+    while task.wait(0.05) do
+        if not Settings.AutoParry then continue end
+        local now = os.clock()
+        if now - LastParry < Settings.ParryCooldown then continue end
+        
+        local attacker = getNearestAttacker()
+        if attacker then
+            LastParry = now
+            -- Kirim sinyal parry — sesuaikan dengan nama remote di game
+            pcall(function()
+                local rem = ReplicatedStorage:FindFirstChild("Remotes")
+                if rem and rem:FindFirstChild("Parry") then
+                    rem.Parry:FireServer()
+                elseif rem and rem:FindFirstChild("Block") then
+                    rem.Block:FireServer(true)
+                end
+            end)
+            -- Simulasi tombol parry
+            pcall(function()
+                UserInputService:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+                task.wait(0.05)
+                UserInputService:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+            end)
+        end
+    end
+end)
+
+-- ==============================================
+-- 🎯 AIMBOT
+-- ==============================================
+local function getAimbotTarget()
+    local center = getScreenCenter()
+    local target, minDist = nil, 1e9
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LocalPlayer or not p.Character then continue end
+        local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+        local head = p.Character:FindFirstChild("Head")
+        local pos = head and head.Position or hrp and hrp.Position
+        if not pos then continue end
+        
+        local isEnemy = isTeamKiller(p)
+        if not isEnemy then continue end
+        
+        local d = getDistance(pos)
+        if d > Settings.AimbotMaxDistance then continue end
+        local sc, onScr = worldToScreen(pos)
+        if not onScr then continue end
+        local scrDist = (sc - center).Magnitude
+        if scrDist < minDist then
+            minDist = scrDist
+            target = pos
+        end
+    end
+    return target
+end
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Settings.AimbotKey and Settings.Aimbot then
+        local targetPos = getAimbotTarget()
+        if targetPos then
+            local goal = CFrame.new(CurrentCamera.CFrame.Position, targetPos)
+            TweenService:Create(CurrentCamera, TweenInfo.new(Settings.AimbotSmoothness, Enum.EasingStyle.Sine), {CFrame = goal}):Play()
+        end
+    end
+end)
+
+-- ==============================================
+-- 🔇 SILENT AIM
+-- ==============================================
+local function hookSilentAim()
+    SilentAimOriginal = ReplicatedStorage.RemoteEvent or ReplicatedStorage.SendEvent
+end
+
+-- Silent Aim untuk Veil / Serangan Jarak Jauh
+local function getSilentTargetVeil()
+    local t, d = getNearestSurvivor(200)
+    if not t or not t.Character then return nil end
+    return t.Character:FindFirstChild("Head") or t.Character:FindFirstChild("HumanoidRootPart")
+end
+
+-- Silent Aim untuk Pistol
+local function getSilentTargetPistol()
+    local t, d = getNearestSurvivor(300)
+    if not t or not t.Character then return nil end
+    return t.Character:FindFirstChild("Head") or t.Character:FindFirstChild("HumanoidRootPart")
+end
+
+-- Tangkap pengiriman peluru / serangan
+local function processSilentAim(remote, args)
+    if not args or not args[1] then return args end
+    
+    local newArgs = {unpack(args)}
+    
+    -- Silent Aim Veil
+    if Settings.SilentAimVeil and string.find(string.lower(remote.Name), "veil") or string.find(string.lower(remote.Name), "shoot") then
+        local target = getSilentTargetVeil()
+        if target then
+            if typeof(args[1]) == "Vector3" then
+                local offset = Settings.SilentAimRandomize and Vector3.new(math.random(-5,5)/10, math.random(-5,5)/10, math.random(-5,5)/10) or Vector3.new()
+                newArgs[1] = target.Position + offset
+            end
+        end
+    end
+    
+    -- Silent Aim Pistol
+    if Settings.SilentAimPistol and string.find(string.lower(remote.Name), "gun") or string.find(string.lower(remote.Name), "pistol") or string.find(string.lower(remote.Name), "bullet") then
+        local target = getSilentTargetPistol()
+        if target then
+            if typeof(args[1]) == "Vector3" then
+                local offset = Settings.SilentAimRandomize and Vector3.new(math.random(-3,3)/10, math.random(-3,3)/10, math.random(-3,3)/10) or Vector3.new()
+                newArgs[1] = target.Position + offset
+            end
+        end
+    end
+    
+    return newArgs
+end
+
+-- Pantau semua remote
+ReplicatedStorage.ChildAdded:Connect(function(child)
+    if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+        pcall(function()
+            child.OnServerEvent:Connect(function(plr, ...)
+                if plr ~= LocalPlayer then return end
+                local args = {...}
+                local newArgs = processSilentAim(child, args)
+                if newArgs ~= args then
+                    -- Kirim ulang dengan target yang diubah
+                    child:FireServer(unpack(newArgs))
+                end
+            end)
+        end)
+    end
+end)
+
+-- Cek remote yang sudah ada saat dimuat
+for _, c in ipairs(ReplicatedStorage:GetChildren()) do
+    if c:IsA("RemoteEvent") then
+        pcall(function()
+            c.OnServerEvent:Connect(function(plr, ...)
+                if plr ~= LocalPlayer then return end
+                local args = {...}
+                local newArgs = processSilentAim(c, args)
+                if newArgs ~= args and table.concat(newArgs, ",") ~= table.concat(args, ",") then
+                    -- Sudah ditangani
+                end
+            end)
+        end)
+    end
+end
+
+-- ==============================================
+-- 🎨 MENU
+-- ==============================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AlviHub"
+ScreenGui.Parent = CoreGui
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 300, 0, 520)
+MainFrame.Position = UDim2.new(0.02, 0, 0.5, -260)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1,0,0,45)
+TitleBar.BackgroundColor3 = Color3.fromRGB(40,40,60)
+TitleBar.Parent = MainFrame
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1,-10,1,0)
+Title.Position = UDim2.new(0,10,0,0)
+Title.BackgroundTransparency = 1
+Title.Text = "🔰 AlviHub — Full Version"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 16
+Title.TextColor3 = Color3.fromRGB(255,255,255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1,-16,1,-55)
+ScrollFrame.Position = UDim2.new(0,8,0,47)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.Parent = MainFrame
+
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0,6)
+Layout.Parent = ScrollFrame
+
+local function buatTombol(nama, kunci, cb)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,0,0,36)
+    btn.BackgroundColor3 = Settings[kunci] and Color3.fromRGB(60,120,220) or Color3.fromRGB(50,50,70)
+    btn.Text = nama .. " : " .. (Settings[kunci] and "ON ✅" or "OFF ❌")
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.AutoLocalize = false
+    btn.Parent = ScrollFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
+    
+    btn.MouseButton1Click:Connect(function()
+        Settings[kunci] = not Settings[kunci]
+        btn.BackgroundColor3 = Settings[kunci] and Color3.fromRGB(60,120,220) or Color3.fromRGB(50,50,70)
+        btn.Text = nama .. " : " .. (Settings[kunci] and "ON ✅" or "OFF ❌")
+        if cb then cb() end
+    end)
+end
+
+local function buatJudul(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,0,0,24)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 13
+    lbl.TextColor3 = Color3.fromRGB(150,150,180)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = ScrollFrame
+end
+
+-- Bagian Umum
+buatJudul("⚙️ FITUR UMUM")
+buatTombol("Anti AFK", "AntiAFK")
+buatTombol("Tembus Dinding", "Noclip")
+buatTombol("Lompat Tanpa Batas", "InfiniteJump")
+buatTombol("Kecepatan Tambahan", "SpeedBoost")
+buatTombol("Tidak Melambat", "NoSlowdown")
+buatTombol("Layar Terang", "FullBright", updateLighting)
+buatTombol("Hapus Kabut", "NoFog", updateLighting)
+buatTombol("Hapus Bayangan", "NoShadow", updateLighting)
+buatTombol("Sembuhkan Otomatis", "AutoHeal")
+
+-- Bagian ESP
+buatJudul("👁️ SISTEM ESP")
+buatTombol("ESP Utama", "ESP_Master")
+buatTombol("Tampilkan Killer", "ESP_Killer")
+buatTombol("Tampilkan Teman", "ESP_Survivor")
+buatTombol("Tampilkan Nama", "ESP_Name")
+buatTombol("Tampilkan Jarak", "ESP_Distance")
+buatTombol("Bingkai Sorot", "ESP_Highlight")
+
+-- Bagian Pertempuran
+buatJudul("⚔️ PERTEMPURAN")
+buatTombol("Auto Parry", "AutoParry")
+buatTombol("Aimbot (Tahan E)", "Aimbot")
+buatTombol("Silent Aim Veil", "SilentAimVeil")
+buatTombol("Silent Aim Pistol", "SilentAimPistol")
+
+ScrollFrame.CanvasSize = UDim2.new(0,0,0,Layout.AbsoluteContentSize.Y+10)
+
+-- Notifikasi
+local Notif = Instance.new("TextLabel")
+Notif.Size = UDim2.new(0,280,0,50)
+Notif.Position = UDim2.new(0.5,-140,0.05,0)
+Notif.BackgroundColor3 = Color3.fromRGB(40,160,80)
+Notif.Text = "✅ AlviHub Lengkap Dimuat!"
+Notif.Font = Enum.Font.GothamBold
+Notif.TextSize = 15
+Notif.TextColor3 = Color3.fromRGB(255,255,255)
+Notif.ZIndex = 100
+Notif.Parent = ScreenGui
+Instance.new("UICorner", Notif).CornerRadius = UDim.new(0,8)
+task.delay(4, function() Notif:Destroy() end)
+
+print("=== AlviHub Aktif ===")
